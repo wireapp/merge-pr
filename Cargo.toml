@@ -7,6 +7,9 @@ description = "Merge a PR with a linear history and commit signing"
 license = "GPL-3.0-only"
 publish = false
 
+[package.metadata.dist]
+dist = true
+
 [dependencies]
 anyhow = "1.0.95"
 clap = { version = "4.5.27", features = ["derive"] }
