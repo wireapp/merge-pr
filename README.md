@@ -18,3 +18,17 @@ This tool will fail unless both `git` and `gh` are installed, available on the P
 ## Assumptions
 
 Your trunk branch is called `main`.
+
+## Installation
+
+### With Rust Toolchain / Local Build
+
+```sh
+cargo install --git https://github.com/wireapp/merge-pr
+```
+
+### Without Rust Toolchain / Download Prebuilt Artifact
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/wireapp/merge-pr/releases/latest/download/merge-pr-installer.sh | sh
+```
