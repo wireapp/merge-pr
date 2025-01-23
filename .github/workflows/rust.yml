@@ -8,13 +8,26 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  check-test:
-
+  check:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
     - run: cargo clippy
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
     - run: cargo test
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: rustfmt
+    - uses: actions-rust-lang/rustfmt@v1
