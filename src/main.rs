@@ -23,6 +23,10 @@ struct Args {
     /// to synchronize itself.
     #[arg(short = 'i', long, default_value_t = 2.5)]
     push_retry_interval: f64,
+
+    /// When set, perform checks but do not actually change the repo state.
+    #[arg(short, long)]
+    dry_run: bool,
 }
 
 fn ensure_tool(sh: &Shell, tool_name: &str) -> Result<()> {
@@ -141,6 +145,11 @@ fn main() -> Result<()> {
             }
             bail!("some ci checks are incomplete or unsuccessful");
         }
+    }
+
+    if args.dry_run {
+        println!("all checks OK but aborting due to dry run");
+        return Ok(());
     }
 
     // ensure that the branch is at the tip of its base for a linear history
