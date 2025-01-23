@@ -40,7 +40,7 @@ struct StatusCheck {
     #[serde(rename = "__typename")]
     type_name: String,
     name: String,
-    status: String,
+    status: Option<String>,
     conclusion: String,
 }
 
@@ -50,7 +50,8 @@ impl StatusCheck {
     }
 
     fn is_successy(&self) -> bool {
-        self.status == "COMPLETED" && (self.conclusion == "SUCCESS" || self.conclusion == "SKIPPED")
+        self.status.as_deref() == Some("COMPLETED")
+            && (self.conclusion == "SUCCESS" || self.conclusion == "SKIPPED")
     }
 }
 
