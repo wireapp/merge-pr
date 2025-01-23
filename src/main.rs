@@ -175,7 +175,7 @@ fn main() -> Result<()> {
         .read()
         .context("reading remote branch sha")?;
     if branch_sha != remote_branch_sha {
-        cmd!(sh, "git push -f")
+        cmd!(sh, "git push -f origin {branch}")
             .run()
             .context("force-pushing branch")?;
     }
@@ -194,11 +194,11 @@ fn main() -> Result<()> {
     //
     // sometimes it takes a few seconds for github to catch up, so in the event of a failure we try again
     // a bit later.
-    let push_result = cmd!(sh, "git push").run();
+    let push_result = cmd!(sh, "git push origin {base}").run();
     if push_result.is_err() {
         println!("this is normal; retrying in {}s", args.push_retry_interval);
         std::thread::sleep(std::time::Duration::from_secs_f64(args.push_retry_interval));
-        cmd!(sh, "git push")
+        cmd!(sh, "git push origin {base}")
             .run()
             .context("2nd attempt to push to base")?;
     }
