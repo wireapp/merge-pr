@@ -19,7 +19,7 @@ struct Args {
 
     /// How long to wait (seconds) between push attempts.
     ///
-    /// This program will retry the final push of `main` exactly once,
+    /// This program will retry the final push of to the base exactly once,
     /// after this interval, in order to ensure that github has the chance
     /// to synchronize itself.
     #[arg(short = 'i', long, default_value_t = 2.5)]
@@ -57,6 +57,7 @@ impl StatusCheck {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Status {
+    base_ref_name: String,
     review_decision: String,
     status_check_rollup: Vec<StatusCheck>,
 }
@@ -102,7 +103,7 @@ fn main() -> Result<()> {
     // get review and current ci status
     let status = cmd!(
         sh,
-        "gh pr view {branch} --json reviewDecision,statusCheckRollup"
+        "gh pr view {branch} --json baseRefName,reviewDecision,statusCheckRollup"
     )
     .quiet()
     .read()
@@ -125,12 +126,13 @@ fn main() -> Result<()> {
         }
     }
 
-    // ensure that the branch is at the tip of origin/main for a linear history
+    // ensure that the branch is at the tip of its base for a linear history
+    let base = status.base_ref_name;
     cmd!(sh, "git fetch").run().context("git fetch")?;
     cmd!(sh, "git checkout {branch}")
         .run()
         .context("git checkout branch")?;
-    let rebase_result = cmd!(sh, "git rebase origin/main").run();
+    let rebase_result = cmd!(sh, "git rebase origin/{base}").run();
     if rebase_result.is_err() {
         cmd!(sh, "git rebase --abort")
             .run()
@@ -153,12 +155,12 @@ fn main() -> Result<()> {
     }
 
     // we can now actually merge this to main without breaking anything
-    cmd!(sh, "git checkout main")
+    cmd!(sh, "git checkout {base}")
         .run()
-        .context("checking out main")?;
+        .context("checking out base")?;
     cmd!(sh, "git merge {branch} --ff-only")
         .run()
-        .context("performing ff-only merge to main")?;
+        .context("performing ff-only merge to base")?;
 
     // in principle we can now just push; github has some magic to ensure that if you are pushing main
     // to a commit which is at the tip of an approved pr, then it counts it as a manual merge operation
@@ -172,7 +174,7 @@ fn main() -> Result<()> {
         std::thread::sleep(std::time::Duration::from_secs_f64(args.push_retry_interval));
         cmd!(sh, "git push")
             .run()
-            .context("2nd attempt to push to main")?;
+            .context("2nd attempt to push to base")?;
     }
 
     Ok(())
