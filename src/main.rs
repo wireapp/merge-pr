@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
-use itertools::Itertools as _;
 use serde_json::Value;
 use xshell::{cmd, Shell};
 
@@ -36,22 +35,36 @@ fn ensure_tool(sh: &Shell, tool_name: &str) -> Result<()> {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StatusCheck {
-    #[serde(rename = "__typename")]
-    type_name: String,
+struct CheckRun {
+    // we do want to deserialize the name
+    #[allow(dead_code)]
     name: String,
     status: Option<String>,
     conclusion: String,
 }
 
-impl StatusCheck {
-    fn is_check_run(&self) -> bool {
-        self.type_name == "CheckRun"
-    }
-
+impl CheckRun {
     fn is_successy(&self) -> bool {
         self.status.as_deref() == Some("COMPLETED")
             && (self.conclusion == "SUCCESS" || self.conclusion == "SKIPPED")
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "__typename")]
+enum StatusCheck {
+    CheckRun(CheckRun),
+    // we don't care about the value here, but serde needs to know to deserialize _something_
+    #[allow(dead_code)]
+    StatusContext(Value),
+}
+
+impl StatusCheck {
+    fn as_check_run(&self) -> Option<&CheckRun> {
+        match self {
+            Self::CheckRun(check_run) => Some(check_run),
+            _ => None,
+        }
     }
 }
 
@@ -119,11 +132,14 @@ fn main() -> Result<()> {
         let non_success = status
             .status_check_rollup
             .iter()
-            .filter(|check| check.is_check_run() && !check.is_successy())
-            .map(|check| &check.name)
-            .join(", ");
+            .filter_map(StatusCheck::as_check_run)
+            .filter(|check_run| !check_run.is_successy())
+            .collect::<Vec<_>>();
         if !non_success.is_empty() {
-            bail!("some ci checks are incomplete or unsuccessful: {non_success}");
+            for check_run in non_success {
+                println!("{check_run:?}");
+            }
+            bail!("some ci checks are incomplete or unsuccessful");
         }
     }
 
