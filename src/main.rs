@@ -27,6 +27,10 @@ struct Args {
     /// When set, perform checks but do not actually change the repo state.
     #[arg(short, long)]
     dry_run: bool,
+
+    /// When set, retain the merged branch instead of deleting it locally.
+    #[arg(short, long)]
+    retain_branch: bool,
 }
 
 fn ensure_tool(sh: &Shell, tool_name: &str) -> Result<()> {
@@ -201,6 +205,12 @@ fn main() -> Result<()> {
         cmd!(sh, "git push origin {base}")
             .run()
             .context("2nd attempt to push to base")?;
+    }
+
+    if !args.retain_branch {
+        cmd!(sh, "git branch -D {branch}")
+            .run()
+            .context("removing merged branch")?;
     }
 
     Ok(())
