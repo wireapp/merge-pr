@@ -90,6 +90,16 @@ impl Status {
     }
 }
 
+fn local_branch_matches_remote(sh: &Shell, branch: &str) -> Result<bool> {
+    let branch_sha = cmd!(sh, "git rev-parse {branch}")
+        .read()
+        .context("reading branch sha")?;
+    let remote_branch_sha = cmd!(sh, "git rev-parse origin/{branch}")
+        .read()
+        .context("reading remote branch sha")?;
+    Ok(branch_sha == remote_branch_sha)
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     let sh = Shell::new()?;
@@ -162,6 +172,15 @@ fn main() -> Result<()> {
     cmd!(sh, "git checkout {branch}")
         .run()
         .context("git checkout branch")?;
+
+    // Before we rebase, make sure that the state on the local branch corresponds to the one on
+    // remote. Local branch state could differ if there was already a branch that wasn't in sync
+    // with the remote. In this case we don't want to do a rebase and `push -f` as that would
+    // overwrite the remote branch and merge local state, instead of remote.
+    if !local_branch_matches_remote(&sh, &branch)? {
+        bail!("local branch {branch} differs from remote branch origin/{branch}");
+    }
+
     let rebase_result = cmd!(sh, "git rebase origin/{base}").run();
     if rebase_result.is_err() {
         cmd!(sh, "git rebase --abort")
@@ -172,13 +191,7 @@ fn main() -> Result<()> {
 
     // if rebase moved the tip then force-push to ensure github is tracking the new history
     // this resets CI, but doesn't mess with the approvals. We can assume CI is OK, at this point
-    let branch_sha = cmd!(sh, "git rev-parse {branch}")
-        .read()
-        .context("reading branch sha")?;
-    let remote_branch_sha = cmd!(sh, "git rev-parse origin/{branch}")
-        .read()
-        .context("reading remote branch sha")?;
-    if branch_sha != remote_branch_sha {
+    if !local_branch_matches_remote(&sh, &branch)? {
         cmd!(sh, "git push -f origin {branch}")
             .run()
             .context("force-pushing branch")?;
