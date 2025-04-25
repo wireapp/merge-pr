@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use serde_json::Value;
@@ -10,6 +12,8 @@ use xshell::{cmd, Shell};
 #[derive(Debug, Parser)]
 struct Args {
     /// Branch name or PR number to merge
+    ///
+    /// Accepts 3 formats: a PR number, the name of a branch on the remote, or `<fork-owner>:<fork-branch-name>`.
     branch_or_pr_number: Option<String>,
 
     /// When set, ignore CI and just merge straightaway
@@ -104,6 +108,84 @@ fn local_branch_matches_remote(sh: &Shell, remote: &str, branch: &str) -> Result
     Ok(branch_sha == remote_branch_sha)
 }
 
+fn repo_owner_login(sh: &Shell) -> Result<String> {
+    let json = cmd!(sh, "gh repo view --json owner")
+        .quiet()
+        .read()
+        .context("getting repo owner name")?;
+    let value = serde_json::from_str::<Value>(&json).context("parsing gh repo owner name")?;
+    let login = value
+        .pointer("/owner/login")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("malformed result when getting gh repo owner"))?;
+    Ok(login.into())
+}
+
+struct PrData {
+    fork_owner: Option<String>,
+    branch: String,
+}
+
+impl PrData {
+    fn new(fork_owner: Option<&str>, branch: &str) -> Self {
+        Self {
+            fork_owner: fork_owner.map(ToOwned::to_owned),
+            branch: branch.to_owned(),
+        }
+    }
+
+    fn from_branch(branch: &str) -> Self {
+        Self {
+            fork_owner: None,
+            branch: branch.into(),
+        }
+    }
+
+    /// Parse a branch or PR number into `Self`
+    ///
+    /// Accepts 3 formats:
+    ///
+    /// - `<integer>`: a PR number
+    /// - `<string>`: a branch on the current remote
+    /// - `<string>:<string>`: the owner of a fork, followed by the branch on that fork
+    fn parse(sh: &Shell, branch_or_pr_number: &str) -> Result<Self> {
+        if branch_or_pr_number.parse::<u64>().is_ok() {
+            let owner = repo_owner_login(sh)?;
+            let number = branch_or_pr_number;
+            let json = cmd!(
+                sh,
+                "gh pr view {number} --json headRefName,headRepositoryOwner"
+            )
+            .quiet()
+            .read()
+            .context("getting branch name for pr number")?;
+            let value = serde_json::from_str::<Value>(&json).context("parsing gh branch name")?;
+            let branch = value
+                .pointer("/headRefName")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("github did not return headRefName in {json}"))?;
+            let head_owner = value
+                .pointer("/headRepositoryOwner/login")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("malformed response getting head repository owner"))?;
+            let fork_owner = (owner != head_owner).then_some(head_owner);
+            Ok(Self::new(fork_owner, branch))
+        } else if let Some((fork_owner, branch)) = branch_or_pr_number.split_once(':') {
+            Ok(Self::new(Some(fork_owner), branch))
+        } else {
+            Ok(Self::from_branch(branch_or_pr_number))
+        }
+    }
+
+    fn qualified_branch(&self) -> Cow<str> {
+        if let Some(fork_owner) = self.fork_owner.as_deref() {
+            format!("{fork_owner}:{}", self.branch).into()
+        } else {
+            (&self.branch).into()
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     let sh = Shell::new()?;
@@ -115,31 +197,20 @@ fn main() -> Result<()> {
         .read()
         .context("getting current branch")?;
 
-    let branch = match (args.branch_or_pr_number, current_branch.as_str()) {
+    let pr_data = match (args.branch_or_pr_number, current_branch.as_str()) {
         (None, "main") => bail!("on main; must specify the PR number or branch name to merge"),
-        (None, _) => current_branch,
-        (Some(branch), _) => {
-            if branch.parse::<u64>().is_ok() {
-                let json = cmd!(sh, "gh pr view {branch} --json headRefName")
-                    .quiet()
-                    .read()
-                    .context("getting branch name for pr number")?;
-                let value =
-                    serde_json::from_str::<Value>(&json).context("parsing gh branch name")?;
-                let Some(branch) = value.pointer("/headRefName").and_then(Value::as_str) else {
-                    bail!("github did not return headRefName in {json}");
-                };
-                branch.to_owned()
-            } else {
-                branch
-            }
-        }
+        (None, _) => PrData::from_branch(&current_branch),
+        (Some(branch), _) => PrData::parse(&sh, &branch)?,
     };
+
+    let branch = &pr_data.branch;
+    let qualified_branch = pr_data.qualified_branch();
+    let qualified_branch = qualified_branch.as_ref();
 
     // get review and current ci status
     let status = cmd!(
         sh,
-        "gh pr view {branch} --json baseRefName,reviewDecision,statusCheckRollup"
+        "gh pr view {qualified_branch} --json baseRefName,reviewDecision,statusCheckRollup"
     )
     .quiet()
     .read()
@@ -183,7 +254,7 @@ fn main() -> Result<()> {
     // remote. Local branch state could differ if there was already a branch that wasn't in sync
     // with the remote. In this case we don't want to do a rebase and `push -f` as that would
     // overwrite the remote branch and merge local state, instead of remote.
-    if !local_branch_matches_remote(&sh, remote, &branch)? {
+    if !local_branch_matches_remote(&sh, remote, branch)? {
         bail!("local branch {branch} differs from remote branch {remote}/{branch}");
     }
 
@@ -197,7 +268,7 @@ fn main() -> Result<()> {
 
     // if rebase moved the tip then force-push to ensure github is tracking the new history
     // this resets CI, but doesn't mess with the approvals. We can assume CI is OK, at this point
-    if !local_branch_matches_remote(&sh, remote, &branch)? {
+    if !local_branch_matches_remote(&sh, remote, branch)? {
         cmd!(sh, "git push -f {remote} {branch}")
             .run()
             .context("force-pushing branch")?;
