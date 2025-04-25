@@ -31,6 +31,10 @@ struct Args {
     /// When set, retain the merged branch instead of deleting it locally.
     #[arg(short, long)]
     retain_branch: bool,
+
+    /// Name of the relevant git remote.
+    #[arg(short = 'R', long, default_value = "origin")]
+    remote: String,
 }
 
 fn ensure_tool(sh: &Shell, tool_name: &str) -> Result<()> {
@@ -90,11 +94,11 @@ impl Status {
     }
 }
 
-fn local_branch_matches_remote(sh: &Shell, branch: &str) -> Result<bool> {
+fn local_branch_matches_remote(sh: &Shell, remote: &str, branch: &str) -> Result<bool> {
     let branch_sha = cmd!(sh, "git rev-parse {branch}")
         .read()
         .context("reading branch sha")?;
-    let remote_branch_sha = cmd!(sh, "git rev-parse origin/{branch}")
+    let remote_branch_sha = cmd!(sh, "git rev-parse {remote}/{branch}")
         .read()
         .context("reading remote branch sha")?;
     Ok(branch_sha == remote_branch_sha)
@@ -173,26 +177,28 @@ fn main() -> Result<()> {
         .run()
         .context("git checkout branch")?;
 
+    let remote = args.remote.as_str();
+
     // Before we rebase, make sure that the state on the local branch corresponds to the one on
     // remote. Local branch state could differ if there was already a branch that wasn't in sync
     // with the remote. In this case we don't want to do a rebase and `push -f` as that would
     // overwrite the remote branch and merge local state, instead of remote.
-    if !local_branch_matches_remote(&sh, &branch)? {
-        bail!("local branch {branch} differs from remote branch origin/{branch}");
+    if !local_branch_matches_remote(&sh, remote, &branch)? {
+        bail!("local branch {branch} differs from remote branch {remote}/{branch}");
     }
 
-    let rebase_result = cmd!(sh, "git rebase origin/{base}").run();
+    let rebase_result = cmd!(sh, "git rebase {remote}/{base}").run();
     if rebase_result.is_err() {
         cmd!(sh, "git rebase --abort")
             .run()
             .context("aborting rebase")?;
-        bail!("{branch} did not cleanly rebase onto origin/main; do so manually and try again");
+        bail!("{branch} did not cleanly rebase onto {remote}/{base}; do so manually and try again");
     }
 
     // if rebase moved the tip then force-push to ensure github is tracking the new history
     // this resets CI, but doesn't mess with the approvals. We can assume CI is OK, at this point
-    if !local_branch_matches_remote(&sh, &branch)? {
-        cmd!(sh, "git push -f origin {branch}")
+    if !local_branch_matches_remote(&sh, remote, &branch)? {
+        cmd!(sh, "git push -f {remote} {branch}")
             .run()
             .context("force-pushing branch")?;
     }
@@ -211,11 +217,11 @@ fn main() -> Result<()> {
     //
     // sometimes it takes a few seconds for github to catch up, so in the event of a failure we try again
     // a bit later.
-    let push_result = cmd!(sh, "git push origin {base}").run();
+    let push_result = cmd!(sh, "git push {remote} {base}").run();
     if push_result.is_err() {
         println!("this is normal; retrying in {}s", args.push_retry_interval);
         std::thread::sleep(std::time::Duration::from_secs_f64(args.push_retry_interval));
-        cmd!(sh, "git push origin {base}")
+        cmd!(sh, "git push {remote} {base}")
             .run()
             .context("2nd attempt to push to base")?;
     }
