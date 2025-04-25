@@ -241,14 +241,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let remote = args.remote.as_str();
+
     // ensure that the branch is at the tip of its base for a linear history
     let base = status.base_ref_name;
-    cmd!(sh, "git fetch").run().context("git fetch")?;
+    cmd!(sh, "git fetch {remote}").run().context("git fetch")?;
     cmd!(sh, "git checkout {branch}")
         .run()
         .context("git checkout branch")?;
-
-    let remote = args.remote.as_str();
 
     // Before we rebase, make sure that the state on the local branch corresponds to the one on
     // remote. Local branch state could differ if there was already a branch that wasn't in sync
