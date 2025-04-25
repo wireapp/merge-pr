@@ -324,6 +324,9 @@ fn main() -> Result<()> {
         bail!("local branch {branch} differs from remote branch {head_remote}/{branch}");
     }
 
+    cmd!(sh, "git fetch {remote}")
+        .run()
+        .context(format!("fetching {remote}"))?;
     let rebase_result = cmd!(sh, "git rebase {remote}/{base}").run();
     if rebase_result.is_err() {
         cmd!(sh, "git rebase --abort")
