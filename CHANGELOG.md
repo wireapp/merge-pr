@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.2.0 - 2025-01-23
+## 0.3.0 - 2025-04-28
+
+### Features
+
+- enable merging PRs from a forked repo (d35b369)
+- customizable remote name (67c4081)
+- delete branch by default, retain with flag (82ac4da)
+
+### Bug Fixes
+
+- do not neglect to fetch from origin before rebasing (420c897)
+- keep track of the head remote and use that when appropriate (8046412)
+
+
+## v0.2.0 - 2025-01-23
 
 ### Features
 
