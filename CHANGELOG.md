@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.0 - 2025-06-12
+
+### Features
+
+- do not assume that the default branch is `main` (0cf2c61)
+
 ## v0.3.1 - 2025-06-05
 
 ### Highlights
