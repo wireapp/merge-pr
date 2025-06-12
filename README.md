@@ -15,10 +15,6 @@ preserving both linear history and your signed commits.
 
 This tool will fail unless both `git` and `gh` are installed, available on the PATH, and configured appropriately.
 
-## Assumptions
-
-Your trunk branch is called `main`.
-
 ## Installation
 
 ### With Rust Toolchain / Local Build

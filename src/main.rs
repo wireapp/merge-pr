@@ -108,17 +108,45 @@ fn local_branch_matches_remote(sh: &Shell, remote: &str, branch: &str) -> Result
     Ok(branch_sha == remote_branch_sha)
 }
 
-fn repo_owner_login(sh: &Shell) -> Result<String> {
-    let json = cmd!(sh, "gh repo view --json owner")
+struct RepoData {
+    owner_login: String,
+    default_branch: String,
+}
+
+fn get_repo_data(sh: &Shell) -> Result<RepoData> {
+    let json = cmd!(sh, "gh repo view --json owner,name")
         .quiet()
         .read()
         .context("getting repo owner name")?;
-    let value = serde_json::from_str::<Value>(&json).context("parsing gh repo owner name")?;
-    let login = value
+    let value = serde_json::from_str::<Value>(&json).context("parsing gh repo data")?;
+    let owner_login = value
         .pointer("/owner/login")
         .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("malformed result when getting gh repo owner"))?;
-    Ok(login.into())
+        .ok_or_else(|| anyhow!("malformed result when getting gh repo owner"))?
+        .to_owned();
+    let name = value
+        .pointer("/name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("malformed result when getting gh repo name"))?
+        .to_owned();
+
+    let gql_query = format!("query {{ repository(owner:\"{owner_login}\", name:\"{name}\") {{ defaultBranchRef {{ name }} }} }}");
+    let json = cmd!(sh, "gh api graphql -f query={gql_query}")
+        .quiet()
+        .read()
+        .context("getting repo default branch")?;
+    let value =
+        serde_json::from_str::<Value>(&json).context("parsing gh repo default branch data")?;
+    let default_branch = value
+        .pointer("/data/repository/defaultBranchRef/name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("malformed result when getting gh repo default branch"))?
+        .to_owned();
+
+    Ok(RepoData {
+        owner_login,
+        default_branch,
+    })
 }
 
 struct RemoteGuard<'a> {
@@ -187,9 +215,8 @@ impl<'a> PrData<'a> {
     /// - `<integer>`: a PR number
     /// - `<string>`: a branch on the current remote
     /// - `<string>:<string>`: the owner of a fork, followed by the branch on that fork
-    fn parse(sh: &'a Shell, branch_or_pr_number: &str) -> Result<Self> {
+    fn parse(sh: &'a Shell, branch_or_pr_number: &str, repo_data: &RepoData) -> Result<Self> {
         if branch_or_pr_number.parse::<u64>().is_ok() {
-            let owner = repo_owner_login(sh)?;
             let number = branch_or_pr_number;
             let json = cmd!(
                 sh,
@@ -211,7 +238,7 @@ impl<'a> PrData<'a> {
                 .pointer("/headRepository/name")
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow!("malformed response getting head repo"))?;
-            let fork = (owner != head_owner).then_some((head_owner, head_repo));
+            let fork = (repo_data.owner_login != head_owner).then_some((head_owner, head_repo));
             Self::new(sh, fork, branch)
         } else if let Some((fork_owner, branch)) = branch_or_pr_number.split_once(':') {
             let json = cmd!(sh, "gh pr view {branch_or_pr_number} --json headRepository")
@@ -249,10 +276,14 @@ fn main() -> Result<()> {
         .read()
         .context("getting current branch")?;
 
+    let repo_data = get_repo_data(&sh).context("getting repo data")?;
+
     let pr_data = match (args.branch_or_pr_number, current_branch.as_str()) {
-        (None, "main") => bail!("on main; must specify the PR number or branch name to merge"),
+        (None, branch) if branch == repo_data.default_branch => {
+            bail!("on default branch; must specify the PR number or branch name to merge")
+        }
         (None, _) => PrData::from_branch(&sh, &current_branch)?,
-        (Some(branch), _) => PrData::parse(&sh, &branch)?,
+        (Some(branch), _) => PrData::parse(&sh, &branch, &repo_data)?,
     };
 
     let branch = &pr_data.branch;
