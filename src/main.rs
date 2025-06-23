@@ -42,11 +42,18 @@ struct Args {
 }
 
 fn ensure_tool(sh: &Shell, tool_name: &str) -> Result<()> {
-    cmd!(sh, "which {tool_name}")
-        .quiet()
-        .ignore_stdout()
-        .run()
-        .map_err(|_| anyhow!("tool `{tool_name}` is required"))
+    if cfg!(windows) {
+        cmd!(sh, "where {tool_name}")
+            .quiet()
+            .ignore_stdout()
+            .run()
+    } else {
+        cmd!(sh, "which {tool_name}")
+            .quiet()
+            .ignore_stdout()
+            .run()
+    }
+    .map_err(|_| anyhow!("tool `{tool_name}` is required"))
 }
 
 #[derive(Debug, serde::Deserialize)]
