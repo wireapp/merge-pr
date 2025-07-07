@@ -28,6 +28,14 @@ struct Args {
     #[arg(short = 'i', long, default_value_t = 2.5)]
     push_retry_interval: f64,
 
+    /// How long to wait (seconds) after pushing the rebased branch before pushing the
+    /// base branch.
+    ///
+    /// This will give github some time to handle the push to the branch before it gets
+    /// merged and (potentially) deleted.
+    #[arg(short = 'w', long, default_value_t = 4.0)]
+    wait_after_rebase: f64,
+
     /// When set, perform checks but do not actually change the repo state.
     #[arg(short, long)]
     dry_run: bool,
@@ -376,6 +384,11 @@ fn main() -> Result<()> {
         cmd!(sh, "git push -f {head_remote} {branch}")
             .run()
             .context("force-pushing branch")?;
+
+        // Because we're pushing again to the remote base branch in a moment, let's wait, to let github
+        // handle this push first. This is desirable, because checks get canceled and appear as failed
+        // if we merge (and delete) the branch too quickly after updating it.
+        std::thread::sleep(std::time::Duration::from_secs_f64(args.wait_after_rebase));
     }
 
     // we can now actually merge this to main without breaking anything
