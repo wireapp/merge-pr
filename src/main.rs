@@ -381,7 +381,7 @@ fn main() -> Result<()> {
     // if rebase moved the tip then force-push to ensure github is tracking the new history
     // this resets CI, but doesn't mess with the approvals. We can assume CI is OK, at this point
     if !local_branch_matches_remote(&sh, head_remote, branch)? {
-        cmd!(sh, "git push -f {head_remote} {branch}")
+        cmd!(sh, "git push --force-with-lease {head_remote} {branch}")
             .run()
             .context("force-pushing branch")?;
 
