@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
@@ -19,6 +19,14 @@ struct Args {
     /// When set, ignore CI and just merge straightaway
     #[arg(long)]
     ignore_ci: bool,
+
+    /// When set, wait for CI to complete, then proceed
+    #[arg(long)]
+    wait_for_ci: bool,
+
+    /// Interval in seconds between CI polls. Only relevant with `--wait-for-ci`.
+    #[arg(long, default_value_t = 5.0)]
+    ci_poll_interval: f64,
 
     /// How long to wait (seconds) between push attempts.
     ///
@@ -61,12 +69,18 @@ fn ensure_tool(sh: &Shell, tool_name: &str) -> Result<()> {
     .map_err(|_| anyhow!("tool `{tool_name}` is required"))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CiState {
+    Success,    // all runs successful
+    Incomplete, // at least 1 run not yet complete, but no failures
+    Fail,       // at least 1 run failed
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CheckRun {
-    // we do want to deserialize the name
-    #[allow(dead_code)]
     name: String,
+    workflow_name: String,
     status: Option<String>,
     conclusion: String,
 }
@@ -75,6 +89,24 @@ impl CheckRun {
     fn is_successy(&self) -> bool {
         self.status.as_deref() == Some("COMPLETED")
             && (self.conclusion == "SUCCESS" || self.conclusion == "SKIPPED")
+    }
+
+    fn state(&self) -> CiState {
+        match (
+            self.status.as_deref().unwrap_or_default(),
+            self.conclusion.as_str(),
+        ) {
+            ("COMPLETED", "SUCCESS") => CiState::Success,
+            ("IN_PROGRESS", "") => CiState::Incomplete,
+            ("COMPLETED", "FAILURE") => CiState::Fail,
+            (status, conclusion) => {
+                eprintln!(
+                    "unxpected (status, conclusion) for {} / {}: ({status}, {conclusion})",
+                    self.workflow_name, self.name
+                );
+                CiState::Fail
+            }
+        }
     }
 }
 
@@ -107,6 +139,30 @@ struct Status {
 impl Status {
     fn is_approved(&self) -> bool {
         self.review_decision == "APPROVED"
+    }
+
+    fn check_runs(&self) -> impl Iterator<Item = &CheckRun> {
+        self.status_check_rollup
+            .iter()
+            .filter_map(StatusCheck::as_check_run)
+    }
+
+    fn ci_state(&self) -> CiState {
+        let mut in_progress = false;
+        for state in self.check_runs().map(CheckRun::state) {
+            match state {
+                CiState::Success => {
+                    // no action possible yet
+                }
+                CiState::Incomplete => in_progress = true,
+                CiState::Fail => return CiState::Fail,
+            }
+        }
+        if in_progress {
+            CiState::Incomplete
+        } else {
+            CiState::Success
+        }
     }
 }
 
@@ -277,6 +333,19 @@ impl<'a> PrData<'a> {
     }
 }
 
+fn poll_status(sh: &Shell, qualified_branch: &str) -> Result<Status> {
+    let status = cmd!(
+        sh,
+        "gh pr view {qualified_branch} --json baseRefName,reviewDecision,statusCheckRollup"
+    )
+    .quiet()
+    .read()
+    .context("getting status from github")?;
+
+    let status = serde_json::from_str::<Status>(&status).context("parsing github status")?;
+    Ok(status)
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     let sh = Shell::new()?;
@@ -308,32 +377,33 @@ fn main() -> Result<()> {
         .unwrap_or(&args.remote);
 
     // get review and current ci status
-    let status = cmd!(
-        sh,
-        "gh pr view {qualified_branch} --json baseRefName,reviewDecision,statusCheckRollup"
-    )
-    .quiet()
-    .read()
-    .context("getting status from github")?;
-
-    let status = serde_json::from_str::<Status>(&status).context("parsing github status")?;
+    let mut status = poll_status(&sh, qualified_branch)?;
     if !status.is_approved() {
         bail!("{branch} has not been approved");
     }
 
-    if !args.ignore_ci {
-        let non_success = status
-            .status_check_rollup
-            .iter()
-            .filter_map(StatusCheck::as_check_run)
-            .filter(|check_run| !check_run.is_successy())
-            .collect::<Vec<_>>();
-        if !non_success.is_empty() {
-            for check_run in non_success {
-                println!("{check_run:?}");
-            }
-            bail!("some ci checks are incomplete or unsuccessful");
+    if args.wait_for_ci {
+        // retry until success or fail
+        while status.ci_state() == CiState::Incomplete {
+            std::thread::sleep(Duration::from_secs_f64(args.ci_poll_interval));
+            status = poll_status(&sh, qualified_branch)?;
         }
+    }
+
+    if !args.ignore_ci && status.ci_state() != CiState::Success {
+        for non_success in status
+            .check_runs()
+            .filter(|check_run| !check_run.is_successy())
+        {
+            let state = non_success.state();
+            let CheckRun {
+                name,
+                workflow_name,
+                ..
+            } = non_success;
+            println!("{workflow_name} / {name}: {state:?}");
+        }
+        bail!("some ci checks are incomplete or unsuccessful");
     }
 
     if args.dry_run {
