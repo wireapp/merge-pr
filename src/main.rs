@@ -324,7 +324,7 @@ impl<'a> PrData<'a> {
         }
     }
 
-    fn qualified_branch(&self) -> Cow<str> {
+    fn qualified_branch(&self) -> Cow<'_, str> {
         if let Some(fork_owner) = self.fork_owner.as_deref() {
             format!("{fork_owner}:{}", self.branch).into()
         } else {
