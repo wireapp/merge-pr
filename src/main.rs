@@ -96,9 +96,13 @@ impl CheckRun {
             self.status.as_deref().unwrap_or_default(),
             self.conclusion.as_str(),
         ) {
-            ("COMPLETED", "SUCCESS") => CiState::Success,
-            ("IN_PROGRESS", "") => CiState::Incomplete,
-            ("COMPLETED", "FAILURE") => CiState::Fail,
+            ("COMPLETED", "SUCCESS" | "SKIPPED" | "NEUTRAL") => CiState::Success,
+            ("QUEUED" | "IN_PROGRESS" | "WAITING" | "REQUESTED" | "PENDING", "") => {
+                CiState::Incomplete
+            }
+            ("COMPLETED", "FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED") => {
+                CiState::Fail
+            }
             (status, conclusion) => {
                 eprintln!(
                     "unxpected (status, conclusion) for {} / {}: ({status}, {conclusion})",
