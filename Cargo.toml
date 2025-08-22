@@ -1,6 +1,6 @@
 [package]
 name = "merge-pr"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 repository = "https://github.com/wireapp/merge-pr"
 description = "Merge a PR with a linear history and commit signing"

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.0 - 2025-08-22
+
+### Features
+
+- use spinner while waiting for CI (6af3313)
+- add `--wait-for-ci` flag (a61e52b)
+- wait after pushing the rebased feature branch (41cef97)
+
+### Bug Fixes
+
+- add more possibilities for status and conclusion (a93c124)
+- use `--force-with-lease` when pushing (e89b4ea)
+
 ## v0.4.0 - 2025-06-12
 
 ### Features
