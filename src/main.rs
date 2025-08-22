@@ -3,6 +3,7 @@ use std::{borrow::Cow, time::Duration};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use serde_json::Value;
+use spinners::{Spinner, Spinners};
 use xshell::{cmd, Shell};
 
 /// Merge this pull request, ensuring a linear history.
@@ -388,10 +389,12 @@ fn main() -> Result<()> {
 
     if args.wait_for_ci {
         // retry until success or fail
+        let mut sp = Spinner::new(Spinners::Dots, "waiting for CI...".into());
         while status.ci_state() == CiState::Incomplete {
             std::thread::sleep(Duration::from_secs_f64(args.ci_poll_interval));
             status = poll_status(&sh, qualified_branch)?;
         }
+        sp.stop_with_newline();
     }
 
     if !args.ignore_ci && status.ci_state() != CiState::Success {
