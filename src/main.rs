@@ -56,6 +56,13 @@ struct Args {
     /// Name of the relevant git remote.
     #[arg(short = 'R', long, default_value = "origin")]
     remote: String,
+
+    /// Do not automatically autosquash.
+    ///
+    /// By default, this tool will automatically autosquash fixup commits.
+    /// If for some reason that behavior is undesirable, this flag will disable it.
+    #[arg(long)]
+    no_autosquash: bool,
 }
 
 fn ensure_tool(sh: &Shell, tool_name: &str) -> Result<()> {
