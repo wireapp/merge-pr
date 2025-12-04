@@ -454,7 +454,19 @@ fn main() -> Result<()> {
     cmd!(sh, "git fetch {remote}")
         .run()
         .context(format!("fetching {remote}"))?;
-    let rebase_result = cmd!(sh, "git rebase {remote}/{base}").run();
+
+    let rebase_result = if args.no_autosquash {
+        cmd!(sh, "git rebase {remote}/{base}").run()
+    } else {
+        // the command is a little funky because autosquash is a noop on non-interactive rebase
+        // but of course, we want a non-interactive rebase here
+        // the solution is to pass a config which specifies a noop interactive editor
+        cmd!(
+            sh,
+            "git -c sequence.editor=: rebase -i --autosquash {remote}/{base}"
+        )
+        .run()
+    };
     if rebase_result.is_err() {
         cmd!(sh, "git rebase --abort")
             .run()
